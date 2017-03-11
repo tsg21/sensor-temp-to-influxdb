@@ -20,60 +20,63 @@ const byte wifiRxPin = 3; // Wire this to Tx Pin of ESP8266
 const byte wifiTxPin = 2; // Wire this to Rx Pin of ESP8266
 
 #define ONE_WIRE_BUS 8
+#define ESP8266_PWR 7
 #define LED_PIN 13
 
 // We'll use a software serial interface to connect to ESP8266
-SoftwareSerial ESP8266 (wifiRxPin, wifiTxPin);
+SoftwareSerial esp8266 (wifiRxPin, wifiTxPin);
 
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 
+// Expecting to have two temp sensors...
+byte addrA[8];
+byte addrB[8];
 
 void setup() {
   
   Serial.begin(9600);
   pinMode(LED_PIN, OUTPUT);
+  pinMode(ESP8266_PWR, OUTPUT);
+  digitalWrite(ESP8266_PWR, HIGH);
 
   Serial.println("Start...");
-  digitalWrite(LED_PIN, HIGH);
-  delay(100);
-  digitalWrite(LED_PIN, LOW);
-  delay(100);
-  digitalWrite(LED_PIN, HIGH);
-  delay(100);
-  digitalWrite(LED_PIN, LOW);
-
-  delay(1000); // Let the modules self-initialize
+  flashes(2);
+  delay(5000); // Let everything self-initialize
+  flashes(4);
 
   setupForSleep();
-  
-  ESP8266.begin(9600); 
+
+  pinMode(wifiRxPin, INPUT);
+  pinMode(wifiTxPin, OUTPUT);
+  esp8266.begin(9600); 
   sensors.begin();
   
-  Serial.println("Sending AT command...");
-  // actual sending AT command
-  ESP8266.println("AT");
-  readResponseFromESP8266();
-
-  // display output
-
-  // what wifi are you connected to?
-  ESP8266.println("AT+CWJAP?");
-  readResponseFromESP8266();
+  sendAndRead("AT");
+//  sendAndRead("AT+RST"); // Restart yourself...
 
   Serial.print("Locating temperature devices... Found ");
   Serial.print(sensors.getDeviceCount(), DEC);
   Serial.println(" devices.");
 
-  sensors.setResolution(0, 11);
+  sensors.setResolution(11);
+  oneWire.reset_search();
+  oneWire.search(addrA);
+  oneWire.search(addrB);
+  oneWire.reset_search();
+  printAddress("addrA", addrA);
+  printAddress("addrB", addrB);
 
-  // close any existing connection - just in case
-  ESP8266.println("AT+CIPCLOSE");
-  readResponseFromESP8266();
+  // wait for the wifi module to connect
+  delay(10000);
 
-  ESP8266.println("AT+CIPSTART=\"UDP\",\"34.248.64.57\",8089");
-  readResponseFromESP8266();
+  // what wifi are you connected to?
+  sendAndRead("AT+CWJAP?");
+  delay(500);
 
+  digitalWrite(ESP8266_PWR, LOW);
+  
+  sleepFor8s();
 }
 
 int count = 0;
@@ -82,6 +85,10 @@ char command[256];
 
 void loop() {
   digitalWrite(LED_PIN, HIGH);
+  digitalWrite(ESP8266_PWR, HIGH);
+  delay(5000);
+  sendAndRead("AT");
+  sendAndRead("AT+CIPSTART=\"UDP\",\"34.248.64.57\",8089");
   
   // read the temperature
   sensors.requestTemperatures();
@@ -90,27 +97,38 @@ void loop() {
   int idx = sprintf(buffer, "weather temp=");
   dtostrf(temp, 0, 2, buffer+idx);
 
-  Serial.println(buffer);
+//  Serial.println(buffer);
   
   sprintf(command, "AT+CIPSEND=%i", strlen(buffer));
 
-  ESP8266.println(command);
-  readResponseFromESP8266();
+  sendAndRead(command);
   
-  ESP8266.print(buffer);
+  esp8266.print(buffer);
   readResponseFromESP8266();
 
   digitalWrite(LED_PIN, LOW);
+  sendAndRead("AT+CIPCLOSE");
+  digitalWrite(ESP8266_PWR, LOW);
+  
+  delay(100); //alow the serial write to complete
 
-  for (int i=0; i<1; i++) sleepFor8s();
+  for (int i=0; i<5; i++) sleepFor8s();
+}
+
+void sendAndRead(char * toSend) {
+  Serial.print("SEND: ");
+  Serial.println(toSend);
+  esp8266.println(toSend);
+  readResponseFromESP8266();
 }
 
 void readResponseFromESP8266() {
-  while (ESP8266.available()){
-     String inData = ESP8266.readStringUntil('\n');
-     Serial.println("ESP8266: " + inData);
-  }
-
+  do {
+    String inData = esp8266.readStringUntil('OK\r\n');
+    Serial.print("ESP8266: [");
+    Serial.print(inData);
+    Serial.println("]");
+  } while(esp8266.available());
 }
 
 
@@ -124,6 +142,9 @@ void sleepFor8s() {
  
   // Set sleep enable (SE) bit:
   sleep_enable();
+
+  //disable brown-out detection while sleeping (20-25µA)
+  sleep_bod_disable();
  
   // Put the device to sleep:
   sleep_mode();
@@ -162,5 +183,23 @@ void setupForSleep() {
   /* Enable the WD interrupt (note no reset). */
   WDTCSR |= _BV(WDIE);
   
+}
+
+void flashes(int count) {
+  for (int i=0; i<count; i++) {
+    digitalWrite(LED_PIN, HIGH);
+    delay(100);
+    digitalWrite(LED_PIN, LOW);
+    delay(200);
+  }
+}
+
+void printAddress(char* name, const uint8_t* deviceAddress) {
+  Serial.print(name);
+  Serial.print(": ");
+  for (int i=0; i<8; i++) {
+    Serial.print(deviceAddress[i], HEX);
+  }
+  Serial.println();
 }
 
