@@ -42,7 +42,7 @@ void setup() {
 
   Serial.println("Start...");
   flashes(2);
-  delay(5000); // Let everything self-initialize
+  delay(4000); // Let everything self-initialize
   flashes(4);
 
   setupForSleep();
@@ -86,7 +86,7 @@ char command[256];
 void loop() {
   digitalWrite(LED_PIN, HIGH);
   digitalWrite(ESP8266_PWR, HIGH);
-  delay(5000);
+  delay(4000);
   sendAndRead("AT");
   sendAndRead("AT+CIPSTART=\"UDP\",\"34.248.64.57\",8089");
   
@@ -94,11 +94,14 @@ void loop() {
   sensors.requestTemperatures();
   float temp = sensors.getTempCByIndex(0);
 
-  int idx = sprintf(buffer, "weather temp=");
-  dtostrf(temp, 0, 2, buffer+idx);
+  char * bufferPtr = buffer;
 
-//  Serial.println(buffer);
+  bufferPtr += sprintf(bufferPtr, "temps ");
+  bufferPtr = writeTemp(bufferPtr, addrA);
+  bufferPtr += sprintf(bufferPtr, ",");
+  bufferPtr = writeTemp(bufferPtr, addrB);
   
+  Serial.println(buffer);
   sprintf(command, "AT+CIPSEND=%i", strlen(buffer));
 
   sendAndRead(command);
@@ -114,6 +117,24 @@ void loop() {
 
   for (int i=0; i<5; i++) sleepFor8s();
 }
+
+char * writeTemp(char * to, const uint8_t* deviceAddress) {
+  // Write out the name of the sensor
+  char* result = to;
+  for (int i=0; i<8; i++) {
+    result += sprintf(result, "%x", deviceAddress[i]);
+  }
+
+  result += sprintf(result, "=");
+
+  float temp = sensors.getTempC(deviceAddress);
+  dtostrf(temp, 0, 2, result);
+
+  return result + strlen(result);
+}
+
+
+
 
 void sendAndRead(char * toSend) {
   Serial.print("SEND: ");
@@ -190,7 +211,7 @@ void flashes(int count) {
     digitalWrite(LED_PIN, HIGH);
     delay(100);
     digitalWrite(LED_PIN, LOW);
-    delay(200);
+    delay(100);
   }
 }
 
